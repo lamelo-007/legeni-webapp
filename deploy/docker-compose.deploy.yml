@@ -1,0 +1,14 @@
+services:
+  web:
+    image: ${IMAGE_REF:?IMAGE_REF requis}
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      APP_COLOR: "${APP_COLOR:-#1f6feb}"
+    ports:
+      - "${PORT:-8080}:5000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
