@@ -28,3 +28,10 @@
 
 ## 5. Pistes d'amélioration
 Terminer le pipeline Jenkins, Ingress + TLS, HPA, Prometheus/Grafana.
+
+## 6. Incident de sécurité et correction
+Lors d'un `git add .` sur `main`, le fichier `.vault_pass` a été commité et poussé par erreur. Actions menées :
+- historique de `main` réécrit (`git reset` puis `git push --force-with-lease`) : `git log --all -- .vault_pass` ne renvoie plus rien ;
+- mot de passe du coffre Ansible Vault et mots de passe Redis régénérés, secrets Kubernetes réappliqués par Ansible ;
+- `.vault_pass` ajouté au `.gitignore`, et `git add` désormais fait fichier par fichier après contrôle de `git status`.
+Limite : GitHub peut conserver quelque temps d'anciens commits accessibles par leur numéro, d'où la rotation des secrets.
