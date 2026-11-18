@@ -1,0 +1,5 @@
+- name: Provisionner la machine
+  hosts: provision
+  roles:
+    - docker
+    - minikube
