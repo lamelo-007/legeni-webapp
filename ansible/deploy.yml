@@ -1,0 +1,84 @@
+- name: Déployer Legeni WebApp sur Kubernetes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - "vars/{{ target_env }}.yml"
+    - vars/vault.yml
+  vars:
+    image_pull_policy: Always
+    readiness_path: /ready
+    wait_timeout: 120
+
+  pre_tasks:
+    - name: Vérifier les variables obligatoires
+      ansible.builtin.assert:
+        that:
+          - target_env in ['staging', 'prod']
+          - app_version is defined
+          - webapp_image is defined
+          - redis_password | length > 0
+      no_log: true
+
+  tasks:
+    - name: Namespace
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ k8s_namespace }}"
+            labels: {env: "{{ target_env }}"}
+
+    - name: Secret Redis
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: redis-secret
+            namespace: "{{ k8s_namespace }}"
+          stringData:
+            password: "{{ redis_password }}"
+      no_log: true
+
+    - name: Déployer avec retour arrière automatique
+      block:
+        - name: Appliquer les manifests (et attendre le rolling update)
+          kubernetes.core.k8s:
+            definition: "{{ lookup('ansible.builtin.template', 'k8s/webapp.yml.j2') }}"
+            wait: true
+            wait_timeout: "{{ wait_timeout }}"
+
+        - name: Trouver un pod de l'application
+          kubernetes.core.k8s_info:
+            kind: Pod
+            namespace: "{{ k8s_namespace }}"
+            label_selectors: [app=webapp]
+            field_selectors: [status.phase=Running]
+          register: pods
+
+        - name: Smoke test (version renvoyée par le Service)
+          kubernetes.core.k8s_exec:
+            namespace: "{{ k8s_namespace }}"
+            pod: "{{ pods.resources[0].metadata.name }}"
+            command: >-
+              python -c "import json,urllib.request as u;print(json.load(u.urlopen('http://webapp/api/info'))['version'])"
+          register: smoke
+          until: smoke.stdout | trim == (app_version | split('-') | first)
+          retries: 5
+          delay: 3
+          changed_when: false
+
+      rescue:
+        - name: Retour à la version précédente
+          kubernetes.core.k8s_rollback:
+            api_version: apps/v1
+            kind: Deployment
+            name: webapp
+            namespace: "{{ k8s_namespace }}"
+          failed_when: false
+
+        - name: Signaler l'échec (build rouge)
+          ansible.builtin.fail:
+            msg: "Déploiement de {{ app_version }} en {{ target_env }} échoué : rollback effectué"
